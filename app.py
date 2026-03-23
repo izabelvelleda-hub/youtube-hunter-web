@@ -105,7 +105,12 @@ def executar_busca(api_key, query, max_results, duration, min_subs, max_subs, mi
                 dias_de_vida = 9999
 
             # --- FILTRAGEM DE RANGE (Mínimo <= Valor <= Máximo) ---
-            if (min_subs <= subs <= max_subs) and (min_videos <= vids <= max_videos):
+            # --- Lógica de Filtro Inteligente (Canais Novos + Virais) ---
+            # Aceita se o canal for pequeno OU se o vídeo tiver muitas views por dia
+            e_canal_pequeno = (min_subs <= subs <= max_subs)
+            e_viral_absurdo = (views > 50000) # Se o vídeo tem +50k views em 7 dias, ignore o tamanho do canal
+
+            if (e_canal_pequeno or e_viral_absurdo) and (min_videos <= vids <= max_videos):
                 
                 media_views = int(views_total / vids) if vids > 0 else 0
                 
