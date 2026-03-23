@@ -104,15 +104,13 @@ def executar_busca(api_key, query, max_results, duration, min_subs, max_subs, mi
                 data_formatada = "Desconhecida"
                 dias_de_vida = 9999
 
-            # --- FILTRAGEM DE RANGE (Mínimo <= Valor <= Máximo) ---
             # --- Lógica de Filtro Inteligente (Canais Novos + Virais) ---
-            # Aceita se o canal for pequeno OU se o vídeo tiver muitas views por dia
+            # Corrigido: Usando a variável views_total que o seu código já reconhece
             e_canal_pequeno = (min_subs <= subs <= max_subs)
-            e_viral_absurdo = (views > 50000) # Se o vídeo tem +50k views em 7 dias, ignore o tamanho do canal
+            e_viral_forte = (views_total > 10000) # Se o vídeo tem +10k views, ele entra!
 
-            if (e_canal_pequeno or e_viral_absurdo) and (min_videos <= vids <= max_videos):
-                
-                media_views = int(views_total / vids) if vids > 0 else 0
+            if (e_canal_pequeno or e_viral_forte) and (min_videos <= vids <= max_videos):
+                media_views = int(views_total / vids) if vids > 0 else 0        
                 
                 novos.append({
                     'Nome': snippet['title'],
