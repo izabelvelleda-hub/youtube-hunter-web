@@ -5,7 +5,7 @@ import os
 import requests
 import random
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="YouTube Outlier Hunter", layout="wide", page_icon="💎")
@@ -51,78 +51,76 @@ def get_google_suggestions(termo_raiz):
         except: pass
     return list(sugestoes)
 
-# --- MOTOR DE BUSCA (CORE) ---
+# --- MOTOR DE BUSCA (CORE) - VERSÃO VIRAL FACELESS ---
 def executar_busca(api_key, query, max_results, duration, min_subs, max_subs, min_videos, max_videos, region_code, usar_proxima_pagina=False):
     try:
+        from datetime import datetime, timedelta
         youtube = build('youtube', 'v3', developerKey=api_key)
         token = st.session_state['next_page_token'] if usar_proxima_pagina else None
         
-        # 1. BUSCA DE VÍDEOS (Custa 100 cotas)
+        # 1. BUSCA DE VÍDEOS (Calcula 7 dias atrás para pegar o que é NOVO e VIRAL)
         st.session_state['quota_usada'] += 100
+        data_corte = (datetime.utcnow() - timedelta(days=7)).isoformat() + "Z"
         
         search_params = {
-            'q': query, 'part': 'snippet', 'type': 'video',
-            'maxResults': max_results, 'order': 'date', 'pageToken': token,
-            'regionCode': region_code
+            'q': ' ', # Busca ampla sem travar em palavra-chave
+            'part': 'snippet', 
+            'type': 'video',
+            'maxResults': max_results, 
+            'order': 'viewCount', # Ordena pelos mais vistos (o "Viral")
+            'pageToken': token,
+            'regionCode': region_code,
+            'publishedAfter': data_corte, # Apenas vídeos de "poucos dias de vida"
+            'videoCategoryId': '24' # Categoria Entretenimento (onde estão os virais faceless)
         }
+        
+        # Se você selecionar uma duração na tela do app, ela ainda funciona
         if duration: search_params['videoDuration'] = duration
 
         request = youtube.search().list(**search_params)
         response = request.execute()
         
         st.session_state['next_page_token'] = response.get('nextPageToken')
-        st.session_state['termo_atual'] = query
         
-        channel_ids = {item['snippet']['channelId'] for item in response['items']}
-        if not channel_ids: return []
+        # 2. VAMOS BUSCAR AS VIEWS REAIS DE CADA VÍDEO (Essencial para ver o viral)
+        video_ids = [item['id']['videoId'] for item in response['items']]
+        if not video_ids: return []
 
-        # 2. DETALHES DOS CANAIS (Custa 1 cota)
-        st.session_state['quota_usada'] += 1 
-        request_channels = youtube.channels().list(
-            id=','.join(list(channel_ids)),
+        st.session_state['quota_usada'] += 1
+        request_videos = youtube.videos().list(
+            id=','.join(video_ids),
             part='snippet,statistics'
         )
-        channels_response = request_channels.execute()
+        videos_response = request_videos.execute()
         
         novos = []
-        for channel in channels_response['items']:
-            stats = channel['statistics']
-            snippet = channel['snippet']
+        for video in videos_response['items']:
+            stats = video['statistics']
+            snippet = video['snippet']
             
-            subs = int(stats.get('subscriberCount', 0)) if not stats.get('hiddenSubscriberCount') else 0
-            vids = int(stats.get('videoCount', 0))
-            views_total = int(stats.get('viewCount', 0))
-            pais = snippet.get('country', 'N/A')
+            views = int(stats.get('viewCount', 0))
+            data_pub = datetime.strptime(snippet['publishedAt'][:10], "%Y-%m-%d")
+            dias_vida = (datetime.utcnow() - data_pub).days
+            if dias_vida == 0: dias_vida = 1 # Evita divisão por zero
             
-            # --- Lógica de Data e Idade ---
-            try:
-                raw_date = snippet['publishedAt']
-                data_criacao_obj = datetime.strptime(raw_date[:10], "%Y-%m-%d")
-                data_formatada = data_criacao_obj.strftime("%d/%m/%Y")
-                dias_de_vida = (datetime.now() - data_criacao_obj).days
-            except:
-                data_formatada = "Desconhecida"
-                dias_de_vida = 9999
+            # Métrica de Ouro: Views por Dia (VPD)
+            vph = int(views / dias_vida)
 
-            # --- FILTRAGEM DE RANGE (Mínimo <= Valor <= Máximo) ---
-            if (min_subs <= subs <= max_subs) and (min_videos <= vids <= max_videos):
-                
-                media_views = int(views_total / vids) if vids > 0 else 0
-                
-                novos.append({
-                    'Nome': snippet['title'],
-                    'Inscritos': subs,
-                    'Vídeos': vids,
-                    'Total Views': views_total,
-                    'Média Views': media_views,
-                    'País': pais,
-                    'Criação': data_formatada,
-                    'Dias Vida': dias_de_vida,
-                    'Link': f"https://www.youtube.com/channel/{channel['id']}",
-                    'Data Descoberta': datetime.now().strftime("%Y-%m-%d"),
-                    'Thumb': snippet['thumbnails']['default']['url'],
-                    'Desc': snippet.get('description', '')[:100] + "..."
-                })
+            novos.append({
+                'Nome': snippet['title'],
+                'Inscritos': views, # Usando este campo para mostrar as VIEWS no lugar
+                'Vídeos': vph,      # Usando este para mostrar VIEWS/DIA
+                'Total Views': views,
+                'Média Views': vph,
+                'País': region_code,
+                'Criação': data_pub.strftime("%d/%m/%Y"),
+                'Dias Vida': dias_vida,
+                'Link': f"https://www.youtube.com/watch?v={video['id']}",
+                'Data Descoberta': datetime.now().strftime("%Y-%m-%d"),
+                'Thumb': snippet['thumbnails']['high']['url'],
+                'Desc': snippet.get('channelTitle', '') # Mostra o nome do canal aqui
+            })
+            
         return novos
     except Exception as e:
         st.error(f"Erro na API: {e}")
